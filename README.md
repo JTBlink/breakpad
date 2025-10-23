@@ -26,6 +26,111 @@ breakpad/
 └── src/               # 源码符号链接（gclient 模式）
 ```
 
+## Windows平台文件说明
+
+在Windows系统中进行崩溃分析，主要涉及两种特定文件类型：
+
+### Minidump文件（.dmp）
+
+**概述**：
+- Minidump是Windows系统上应用程序崩溃时生成的转储文件
+- 包含崩溃时的内存状态、线程信息、调用堆栈和异常信息
+- 文件大小通常比完整内存转储小得多，便于传输和存储
+- 文件扩展名通常为`.dmp`
+
+**特点**：
+- 包含崩溃时所有线程的调用栈
+- 包含引发崩溃的异常记录
+- 包含加载的模块列表（DLL和EXE）
+- 包含系统信息和进程信息
+- 可能包含选定的内存区域内容
+
+**生成方式**：
+- Windows错误报告（WER）自动生成
+- 通过程序内崩溃处理器（如Breakpad或CrashRpt）生成
+- 使用任务管理器手动创建进程的Dump文件
+- 使用DebugDiag、ProcDump等工具生成
+- 通过Windows调试工具（WinDbg）生成
+
+**DMP文件类型**：
+- 迷你转储（MiniDump）：最常用，包含基本调试信息，体积小
+- 标准转储（StandardDump）：包含更多内存信息
+- 完整转储（FullDump）：包含进程的所有内存，体积大
+
+**结构组成**：
+- 头部信息（Header）：标识符、版本、流数量等
+- 目录（Directory）：指向各数据流的指针
+- 数据流（Streams）：
+  * 系统信息流：操作系统版本、处理器类型等
+  * 线程列表流：线程ID、寄存器状态等
+  * 模块列表流：已加载模块信息（路径、大小、时间戳等）
+  * 内存列表流：内存区域数据
+  * 异常流：崩溃原因、异常代码、异常地址等
+  * 其他辅助信息流
+
+### 程序数据库文件（.pdb）
+
+**概述**：
+- PDB（Program Database）是Windows平台上的调试符号文件
+- 包含源代码与二进制代码之间的映射关系
+- 用于解析崩溃堆栈中的地址为可读的函数名和行号
+- 由Visual Studio或其他编译器在构建时生成
+
+**重要性**：
+- 没有匹配的PDB文件，崩溃堆栈将只显示地址而非函数名
+- PDB必须与对应的二进制文件（版本、编译时间）精确匹配
+- 企业开发应建立中央符号存储库保存所有版本的PDB
+
+**PDB文件内容**：
+- 公共符号信息：函数名、变量名、类型定义等
+- 私有符号信息：函数实现细节、本地变量等
+- 源代码映射：将代码地址与源代码文件和行号关联
+- 类型信息：结构体、类、枚举等类型的详细信息
+- 编译单元信息：关于编译环境和编译选项的数据
+
+**PDB生成方式**：
+- **Visual Studio**：
+  * 启用：项目属性 → C/C++ → 常规 → 调试信息格式 → "程序数据库 (/Zi)"或"编辑并继续 (/ZI)"
+  * 位置：项目属性 → 链接器 → 调试 → 生成程序数据库文件 → 指定路径
+
+- **命令行编译**：
+  * MSVC编译器：`cl /Zi /Od /MDd source.cpp /link /DEBUG /PDB:output.pdb`
+  * 链接器选项：`/DEBUG` 保留调试信息，`/PDB:filename.pdb` 指定PDB文件名
+
+- **CMake构建系统**：
+  ```cmake
+  set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od /MDd")
+  set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "/DEBUG /PDB:${PROJECT_NAME}.pdb")
+  set(CMAKE_EXE_LINKER_FLAGS_DEBUG "/DEBUG /PDB:${PROJECT_NAME}.pdb")
+  ```
+
+**PDB文件管理**：
+- **版本控制**：
+  * 不建议将PDB文件加入版本控制（体积大且频繁变化）
+  * 应使用符号服务器或专门的存储解决方案
+  * 与构建版本关联的唯一标识符（如构建号或Git提交哈希）
+
+- **符号服务器设置**：
+  * 微软推荐使用SymStore工具管理符号存储库
+  * 目录结构：`symbol_server/product_name/GUID/filename.pdb`
+  * 添加PDB：`symstore add /f path\to\file.pdb /s \\server\symbols /t product_name /v version`
+
+- **匹配验证**：
+  * PDB与二进制文件通过GUID匹配
+  * 使用`dumpbin /headers file.exe`查看时间戳和GUID
+  * PDB调试信息头部包含相同的GUID
+
+**调试环境设置**：
+- **Visual Studio**：
+  * 调试 → 选项 → 符号 → 添加符号服务器路径
+  * 支持本地路径和网络UNC路径
+  * 可设置符号缓存目录减少网络传输
+
+- **WinDbg**：
+  * `.sympath+ \\server\symbols`
+  * `.symfix+ C:\SymbolCache`
+  * `.reload`加载所有模块的符号
+
 ## 工具介绍
 
 ### bin/ 目录下的核心工具
@@ -60,6 +165,18 @@ breakpad/
 
 # 批量处理
 find /path/to/binaries -name "*.so" -exec ./bin/dump_syms {} \; > all_symbols.sym
+```
+
+**Windows平台特殊用法**:
+```bash
+# 提取Windows可执行文件符号（需要PDB文件）
+./bin/dump_syms C:/Path/To/app.exe > app.sym
+
+# 直接从PDB文件提取符号
+./bin/dump_syms C:/Path/To/app.pdb > app.sym
+
+# 批量处理Windows DLL文件
+for %f in (C:\Windows\System32\*.dll) do ./bin/dump_syms "%f" > symbols\%~nf.sym
 ```
 
 #### 2. minidump_stackwalk - 堆栈遍历工具
@@ -516,6 +633,76 @@ cat crash_report.txt
 gdb /usr/bin/myapp core
 ```
 
+### 4. Windows平台特有的崩溃分析流程
+
+#### 准备阶段
+```powershell
+# 为所有构建创建符号目录
+mkdir C:\SymbolStore
+
+# 确保构建时启用PDB生成
+# Visual Studio项目属性 -> C/C++ -> 常规 -> 调试信息格式 -> "程序数据库 (/Zi)"
+# 链接器 -> 调试 -> 生成调试信息 -> "是 (/DEBUG)"
+```
+
+#### 符号提取与管理
+```bash
+# Windows平台提取符号（从可执行文件提取）
+./bin/dump_syms path\to\app.exe > symbols\app.sym
+
+# Windows平台提取符号（从PDB文件提取）
+./bin/dump_syms path\to\app.pdb > symbols\app.sym
+
+# 处理符号文件
+$module_line = Get-Content .\symbols\app.sym | Select-Object -First 1
+$parts = $module_line -split " "
+$name = $parts[1]
+$id = $parts[3]
+
+# 创建符号服务器标准目录结构
+New-Item -ItemType Directory -Path ".\symbols\$name\$id\" -Force
+Move-Item .\symbols\app.sym ".\symbols\$name\$id\$name.sym"
+```
+
+#### DMP文件解析
+```bash
+# 基本崩溃报告生成
+./bin/minidump_stackwalk path\to\crash.dmp .\symbols > crash_report.txt
+
+# 详细分析包括所有线程
+./bin/minidump_stackwalk --verbose path\to\crash.dmp .\symbols > crash_detailed.txt
+
+# JSON格式输出（便于程序化处理）
+./bin/minidump_stackwalk --output-format=json path\to\crash.dmp .\symbols > crash.json
+```
+
+#### 与Windows调试工具集成
+```powershell
+# 使用WinDbg分析minidump
+$env:_NT_SYMBOL_PATH = "srv*C:\SymbolCache*https://msdl.microsoft.com/download/symbols;C:\MySymbols"
+Start-Process "C:\Program Files\Windows Kits\10\Debuggers\x64\windbg.exe" -ArgumentList "-z path\to\crash.dmp"
+
+# WinDbg内部命令
+# .sympath+ C:\MySymbols  # 添加本地符号路径
+# !analyze -v             # 详细分析崩溃原因
+# kp                      # 显示带参数的调用堆栈
+# .reload                 # 重新加载符号
+```
+
+#### 自动化处理脚本
+```powershell
+# PowerShell自动处理脚本示例
+$dumpFiles = Get-ChildItem -Path "C:\CrashReports" -Filter "*.dmp"
+$symbolPath = "C:\SymbolStore"
+$outputPath = "C:\AnalysisReports"
+
+foreach ($dump in $dumpFiles) {
+    $outputFile = Join-Path $outputPath "$($dump.BaseName).txt"
+    ./bin/minidump_stackwalk $dump.FullName $symbolPath > $outputFile
+    Write-Host "Processed: $($dump.Name)"
+}
+```
+
 ## 高级用法
 
 ### 自动化符号提取脚本
@@ -677,6 +864,229 @@ find /usr/lib -name "*.so" | xargs -P4 -I{} sh -c '
 - [Google Breakpad 官方文档](https://chromium.googlesource.com/breakpad/breakpad/)
 - [符号文件格式规范](https://chromium.googlesource.com/breakpad/breakpad/+/master/docs/symbol_files.md)
 - [崩溃分析最佳实践](https://chromium.googlesource.com/breakpad/breakpad/+/master/docs/)
+
+## Linux平台处理Windows的PDB和DMP文件
+
+在跨平台开发环境中，经常需要在Linux系统上分析来自Windows平台的崩溃数据。以下是在Linux平台上处理Windows的PDB文件和解析DMP文件的方法。
+
+### 安装依赖
+
+```bash
+# Ubuntu/Debian系统
+sudo apt-get update
+sudo apt-get install -y wine wine64 winetricks
+sudo apt-get install -y cabextract
+
+# 安装Windows调试工具依赖
+winetricks msxml6 vcrun2015 corefonts
+```
+
+### 配置Windows调试工具
+
+```bash
+# 创建工作目录
+mkdir -p ~/windbg_workspace
+
+# 下载Windows调试工具SDK (可选，如果只使用breakpad工具则不需要)
+# 注意：需要从Microsoft网站下载Windows SDK安装程序
+# 使用wine运行安装程序，只选择"Debugging Tools for Windows"组件
+wine ~/Downloads/winsdksetup.exe
+```
+
+### 处理PDB文件
+
+#### 方法1：直接使用Breakpad提取符号
+
+```bash
+# 从Windows PDB文件提取符号信息（Linux系统上运行）
+./bin/dump_syms /path/to/windows_app.pdb > windows_app.sym
+
+# 如果PDB路径包含空格，需要正确引用
+./bin/dump_syms "/path/to/Program Files/MyApp/app.pdb" > app.sym
+
+# 创建符号目录结构
+head -n1 windows_app.sym > module_info
+MODULE=$(cut -d ' ' -f 2 module_info)
+ID=$(cut -d ' ' -f 3 module_info)
+mkdir -p symbols/$MODULE/$ID/
+mv windows_app.sym symbols/$MODULE/$ID/$MODULE.sym
+```
+
+#### 方法2：使用PDB到SYM转换脚本
+
+```bash
+#!/bin/bash
+# pdb_to_sym.sh - 批量处理PDB文件转换为SYM
+
+PDB_DIR="./windows_pdbs"  # Windows PDB文件目录
+SYM_DIR="./symbols"       # 输出符号目录
+
+mkdir -p $SYM_DIR
+
+for pdb_file in $PDB_DIR/*.pdb; do
+  echo "处理: $pdb_file"
+  base_name=$(basename "$pdb_file" .pdb)
+  
+  # 提取符号
+  ./bin/dump_syms "$pdb_file" > temp.sym
+  
+  if [ $? -eq 0 ]; then
+    # 获取模块信息
+    module_line=$(head -n1 temp.sym)
+    module=$(echo $module_line | cut -d ' ' -f 2)
+    id=$(echo $module_line | cut -d ' ' -f 3)
+    
+    # 创建目录结构
+    mkdir -p $SYM_DIR/$module/$id/
+    mv temp.sym $SYM_DIR/$module/$id/$module.sym
+    echo "符号已保存至: $SYM_DIR/$module/$id/$module.sym"
+  else
+    echo "处理 $pdb_file 失败"
+  fi
+done
+```
+
+### 解析Windows的DMP文件
+
+```bash
+# 基本解析
+./bin/minidump_stackwalk /path/to/windows_crash.dmp ./symbols > crash_report.txt
+
+# 详细输出
+./bin/minidump_stackwalk --verbose /path/to/windows_crash.dmp ./symbols > crash_detailed.txt
+
+# 指定CPU类型（如果需要）
+./bin/minidump_stackwalk --cpu-info /path/to/windows_crash.dmp ./symbols > crash_with_cpu.txt
+```
+
+### 解析DMP时的常见问题与解决方案
+
+1. **符号不匹配**
+   ```
+   错误: No symbol file
+   解决: 确保PDB文件与崩溃的可执行文件完全匹配（版本、时间戳、编译ID）
+   ```
+
+2. **路径问题**
+   ```
+   错误: Cannot find symbol file
+   解决: 检查符号目录结构是否符合 ./symbols/module_name/id/module_name.sym
+   ```
+
+3. **Windows与Linux路径格式**
+   ```
+   错误: 路径解析错误
+   解决: 注意转换Windows风格路径为Linux风格路径（反斜杠改为正斜杠）
+   ```
+
+### 交叉平台工作流程示例
+
+```bash
+#!/bin/bash
+# windows_crash_analysis.sh - Windows崩溃在Linux上的分析工作流
+
+DMP_FILE=$1
+PDB_DIR=$2
+OUT_DIR="./crash_analysis"
+
+if [ -z "$DMP_FILE" ] || [ -z "$PDB_DIR" ]; then
+  echo "用法: $0 crash.dmp pdb目录"
+  exit 1
+fi
+
+# 创建输出目录
+mkdir -p $OUT_DIR
+mkdir -p ./symbols
+
+# 处理所有PDB文件
+echo "正在处理PDB文件..."
+for pdb_file in $PDB_DIR/*.pdb; do
+  base_name=$(basename "$pdb_file" .pdb)
+  echo "  提取符号: $base_name"
+  
+  ./bin/dump_syms "$pdb_file" > temp.sym
+  
+  if [ $? -eq 0 ]; then
+    module_line=$(head -n1 temp.sym)
+    module=$(echo $module_line | cut -d ' ' -f 2)
+    id=$(echo $module_line | cut -d ' ' -f 3)
+    
+    mkdir -p ./symbols/$module/$id/
+    mv temp.sym ./symbols/$module/$id/$module.sym
+  else
+    echo "  警告: 无法处理 $pdb_file"
+  fi
+done
+
+# 分析DMP文件
+echo "正在分析崩溃转储..."
+./bin/minidump_stackwalk $DMP_FILE ./symbols > $OUT_DIR/crash_report.txt
+./bin/minidump_dump $DMP_FILE > $OUT_DIR/crash_dump.txt
+
+# 输出模块列表
+echo "正在提取加载模块信息..."
+grep "Loaded modules:" -A 100 $OUT_DIR/crash_report.txt | grep -E "^[0-9]" > $OUT_DIR/loaded_modules.txt
+
+echo "分析完成。报告保存在: $OUT_DIR/"
+```
+
+### 在CI/CD环境中的自动化分析
+
+```yaml
+# .github/workflows/analyze-windows-crashes.yml 示例
+name: Analyze Windows Crashes
+on: [workflow_dispatch]
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libcurl4-openssl-dev
+      
+      - name: Build Breakpad Tools
+        run: |
+          ./configure
+          make -j$(nproc)
+      
+      - name: Download PDBs and DMPs
+        uses: actions/download-artifact@v3
+        with:
+          name: windows-crash-data
+          path: ./crash-data
+      
+      - name: Process PDBs
+        run: |
+          mkdir -p ./symbols
+          for pdb in ./crash-data/*.pdb; do
+            ./bin/dump_syms "$pdb" > temp.sym
+            if [ $? -eq 0 ]; then
+              module_line=$(head -n1 temp.sym)
+              module=$(echo $module_line | cut -d ' ' -f 2)
+              id=$(echo $module_line | cut -d ' ' -f 3)
+              mkdir -p ./symbols/$module/$id/
+              mv temp.sym ./symbols/$module/$id/$module.sym
+            fi
+          done
+      
+      - name: Analyze Crashes
+        run: |
+          mkdir -p ./reports
+          for dmp in ./crash-data/*.dmp; do
+            base=$(basename "$dmp" .dmp)
+            ./bin/minidump_stackwalk "$dmp" ./symbols > ./reports/$base.txt
+          done
+      
+      - name: Upload Analysis Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: crash-analysis-reports
+          path: ./reports
+```
 
 ## 技术支持
 
