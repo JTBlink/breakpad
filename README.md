@@ -703,6 +703,24 @@ foreach ($dump in $dumpFiles) {
 }
 ```
 
+### Windows版本的预编译工具路径
+
+如果您需要在不自行编译的情况下获取Windows版本的工具（如dump_syms.exe），可以在以下位置找到预编译版本：
+
+1. **在Chromium仓库中**：
+   * `src/tools/windows/dump_syms/` - 包含Windows平台的dump_syms工具源码和预编译文件
+   * 仓库地址：https://chromium.googlesource.com/breakpad/breakpad
+
+2. **在Android预构建库中**：
+   * `prebuilts/google-breakpad/windows-x86/` - 包含为Windows x86平台预编译的breakpad工具
+   * 仓库地址：https://android.googlesource.com/platform/prebuilts/google-breakpad/windows-x86/
+
+3. **在Windows SDK中**：
+   * Windows SDK安装目录下的调试工具集也包含一些类似功能的工具
+   * 典型路径：`C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\`
+
+下载预编译工具后，您可以将其放置在方便访问的位置（如项目的bin目录），然后按照本文档中的说明使用这些工具进行崩溃分析和调试。
+
 ## 高级用法
 
 ### 自动化符号提取脚本
