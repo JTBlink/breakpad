@@ -1,4 +1,4 @@
-prefix=/home/zhoubin/work/JTStudio/dev-tools/tools/platforms/unix/crash/breakpad
+prefix=/home/zhoubin/work/JTStudio/breakpad
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include/breakpad
